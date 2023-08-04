@@ -1,0 +1,564 @@
+<!-- Version 2 - creating 3d dog and coloring body parts -->
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body,
+        html {
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            height: 100%;
+            margin: 0;
+        }
+
+        #container {
+            display: flex;
+            height: 100%;
+        }
+
+        #canvasContainer {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 10px;
+        }
+
+        #controlsContainer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            margin: 10px;
+        }
+
+        .controlGroup {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .radioGroup {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .radioGroup .radioItem {
+            margin: 5px;
+        }
+
+        button {
+            margin-top: 20px;
+            font-size: 16px;
+            text-align: center;
+            padding: 10px 25px;
+        }
+    </style>
+
+
+    <script src="../libraries/webgl-debug.js"></script>
+    <script src="../libraries/gl-matrix-min.js"></script>
+
+    <script id="vShader" type="x-shader/x-vertex">
+        //attributes are inputs for vertex shader
+        attribute vec4 aVertexPosition; //vertices' position
+        attribute vec4 aVertexColor; //vertices' color
+        uniform mat4 uPerspectiveViewMatrix; //camera's perspective
+        uniform mat4 uTransformMatrix; //vertices' transformation
+        //varyings are outputs for vertex shader
+        varying vec4 vColor; 
+        void main() {
+            gl_Position = uPerspectiveViewMatrix * uTransformMatrix * aVertexPosition; //calculation vertices' final position
+            vColor = aVertexColor; 
+        } 
+    </script>
+
+    <script id="fShader" type="x-shader/x-fragment">
+        precision mediump float; 
+        //varyings are inputs for fragment shader
+        varying vec4 vColor; 
+        void main() {
+            gl_FragColor = vColor; //fragments' color
+        }
+    </script>
+
+    <script>
+
+        var gl;
+        var canvas;
+        var shadersProgram; //vertex' & fragment's code
+        //variables to store the addresses of attributes/uniforms
+        var vertexPositionAttributePointer; //address for attribute aVertexPosition
+        var vertexColorAttributePointer; //address for attribute aVertexColor
+        var perspectiveViewUniformPointer //address for uniform uPerspectiveViewMatrix
+        var transformUniformPointer; //address for uniform uTransformMatrix
+        var vertexBuffer; //temporary buffer for vertices' position
+        var redColorBuffer; //temporary buffer for vertices' color - red
+        var yellowColorBuffer; //temporary buffer for vertices' color - yellow
+        var indexBuffer; //temporary buffer for refernces of triangles-side of the box
+        //creating matrices, without any initialization
+        var viewMatrix = new Float32Array(16);
+        var perspectiveMatrix = new Float32Array(16);
+        var cameraMatrix = new Float32Array(16); //combined view & perspective Matrix
+        //matrices for transformations
+        var TranslationMatrix = new Float32Array(16);
+        var ScaleMatrix = new Float32Array(16);
+        var TransformMatrix = new Float32Array(16); //combined matrix for translation & scale
+
+
+
+        function createGLContext(inCanvas) {
+            var context = null;
+            context = canvas.getContext("webgl"); //create webgl context
+            if (!context)
+                context = canvas.getContext("experimental-webgl");
+            if (context) {
+                context.viewportWidth = canvas.width;
+                context.viewportHeight = canvas.height;
+            }
+            else {
+                alert("Failed to create WebGL context!");
+            }
+            return context;
+        }
+
+        function createCompileShader(shaderType, shaderSource) {
+            var outShader = gl.createShader(shaderType); //create shader
+            gl.shaderSource(outShader, shaderSource);
+            gl.compileShader(outShader);
+            if (!gl.getShaderParameter(outShader, gl.COMPILE_STATUS)) {
+                alert("Shader compilation error. " + gl.getShaderInfoLog(outShader));
+                gl.deleteShader(outShader);
+                outShader = null;
+            }
+            return outShader;
+        }
+
+        function initShaders() {
+            var vertexShaderSource = document.getElementById("vShader").textContent;
+            var fragmentShaderSource = document.getElementById("fShader").textContent;
+            var vertexShader = createCompileShader(gl.VERTEX_SHADER, vertexShaderSource);
+            var fragmentShader = createCompileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+            shadersProgram = gl.createProgram(); //create program
+            //attach vertex & fragmnet shader to program
+            gl.attachShader(shadersProgram, vertexShader);
+            gl.attachShader(shadersProgram, fragmentShader);
+            gl.linkProgram(shadersProgram); //creating executable
+            if (!gl.getProgramParameter(shadersProgram, gl.LINK_STATUS)) {
+                alert("Shaders linking error.");
+            }
+            gl.useProgram(shadersProgram);
+            //assign to variables, the address of attributes & uniforms used in vertex shader and enable the variable
+            vertexPositionAttributePointer = gl.getAttribLocation(shadersProgram, "aVertexPosition");
+            gl.enableVertexAttribArray(vertexPositionAttributePointer);
+            vertexColorAttributePointer = gl.getAttribLocation(shadersProgram, "aVertexColor");
+            gl.enableVertexAttribArray(vertexColorAttributePointer);
+
+            //no need to enable uniform variables
+            perspectiveViewUniformPointer = gl.getUniformLocation(shadersProgram, "uPerspectiveViewMatrix");
+            transformUniformPointer = gl.getUniformLocation(shadersProgram, "uTransformMatrix");
+        }
+
+        function initBuffers() {
+            //matrix with vertices' position for each side
+            var boxVertices = new Float32Array([
+                // Left side
+                -1.0, -1.0, 1.0, 1.0,
+                -1.0, -1.0, -1.0, 1.0,
+                -1.0, 1.0, 1.0, 1.0,
+                -1.0, 1.0, -1.0, 1.0,
+                // Front side
+                -1.0, 1.0, -1.0, 1.0,
+                -1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, -1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+                // Right side
+                1.0, -1.0, -1.0, 1.0,
+                1.0, -1.0, 1.0, 1.0,
+                1.0, 1.0, -1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+                // Back side
+                -1.0, -1.0, -1.0, 1.0,
+                -1.0, -1.0, 1.0, 1.0,
+                1.0, -1.0, -1.0, 1.0,
+                1.0, -1.0, 1.0, 1.0,
+                // Bottom side
+                -1.0, -1.0, -1.0, 1.0,
+                -1.0, 1.0, -1.0, 1.0,
+                1.0, -1.0, -1.0, 1.0,
+                1.0, 1.0, -1.0, 1.0,
+                // Top side
+                -1.0, -1.0, 1.0, 1.0,
+                -1.0, 1.0, 1.0, 1.0,
+                1.0, -1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0
+            ]);
+
+            //create, enable (bind) and fill vertexBuffer with data from boxVertices
+            vertexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, boxVertices, gl.STATIC_DRAW);
+            vertexBuffer.itemSize = 4; //one vertex per 4 values
+            vertexBuffer.itemCount = 24; //total number of vertices
+
+            //matrix with vertices' color for each side
+            //matrix for red color (ears, paws, tail)
+            var redColor = new Float32Array([
+                // Left side
+                0.5, 0.1, 0.0, 1.0,
+                0.5, 0.1, 0.0, 1.0,
+                0.5, 0.1, 0.0, 1.0,
+                0.5, 0.1, 0.0, 1.0,
+                // Front side
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                // Right side
+                0.6, 0.1, 0.0, 1.0,
+                0.6, 0.1, 0.0, 1.0,
+                0.6, 0.1, 0.0, 1.0,
+                0.6, 0.1, 0.0, 1.0,
+                // Back side
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                0.4, 0.1, 0.0, 1.0,
+                // Bottom side
+                0.7, 0.1, 0.0, 1.0,
+                0.7, 0.1, 0.0, 1.0,
+                0.7, 0.1, 0.0, 1.0,
+                0.7, 0.1, 0.0, 1.0,
+                // Top side
+                0.8, 0.1, 0.0, 1.0,
+                0.8, 0.1, 0.0, 1.0,
+                0.8, 0.1, 0.0, 1.0,
+                0.8, 0.1, 0.0, 1.0,
+
+            ]);
+
+            //create, enable (bind) and fill redColorBuffer with data from redColor
+            redColorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, redColorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, redColor, gl.STATIC_DRAW);
+            redColorBuffer.itemSize = 4; //red color per 4 values / per vertex
+            redColorBuffer.itemCount = 24; //total number of vertices with the color
+
+
+            //matrix for yellow color (body, neck, head)
+            var yellowColor = new Float32Array([
+                // Left side
+                0.8, 0.8, 0.2, 1.0,
+                0.8, 0.8, 0.2, 1.0,
+                0.8, 0.8, 0.2, 1.0,
+                0.8, 0.8, 0.2, 1.0,
+                // Front side
+                0.7, 0.6, 0.1, 1.0,
+                0.7, 0.6, 0.1, 1.0,
+                0.7, 0.6, 0.1, 1.0,
+                0.7, 0.6, 0.1, 1.0,
+                // Right side
+                1.0, 0.8, 0.0, 1.0,
+                1.0, 0.8, 0.0, 1.0,
+                1.0, 0.8, 0.0, 1.0,
+                1.0, 0.8, 0.0, 1.0,
+                // Back side
+                0.6, 0.5, 0.1, 1.0,
+                0.6, 0.5, 0.1, 1.0,
+                0.6, 0.5, 0.1, 1.0,
+                0.6, 0.5, 0.1, 1.0,
+                // Bottom side
+                0.9, 0.7, 0.1, 1.0,
+                0.9, 0.7, 0.1, 1.0,
+                0.9, 0.7, 0.1, 1.0,
+                0.9, 0.7, 0.1, 1.0,
+                // Top side
+                1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 0.0, 1.0,
+
+            ]);
+
+            //create, enable (bind) and fill yellowColorBuffer with data from yellowColor
+            yellowColorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, yellowColorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, yellowColor, gl.STATIC_DRAW);
+            yellowColorBuffer.itemSize = 4; //yellow color per 4 values / per vertex
+            yellowColorBuffer.itemCount = 24; //total number of vertices with the color
+
+
+            // matrix with references to vertices for each side
+            var indexMatrix = new Uint16Array([
+                // Left side
+                0, 1, 2,
+                1, 2, 3,
+                // Front side
+                4, 5, 6,
+                5, 6, 7,
+                // Right side
+                8, 9, 10,
+                9, 10, 11,
+                // Back side
+                12, 13, 14,
+                13, 14, 15,
+                // Bottom side
+                16, 17, 18,
+                17, 18, 19,
+                // Top side
+                20, 21, 22,
+                21, 22, 23
+            ]);
+
+            //create, enable (bind) and fill indexBuffer with data from indexMatrix
+            indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indexMatrix, gl.STATIC_DRAW);
+            indexBuffer.itemCount = 36; //total number of triangles for all sides (6 sides * 2 triangles per side * 3 vertices per triangle)
+
+        }
+
+        function drawScene() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // clear background and z-buffer
+            //getting angle & distance of the camera
+            var angle = parseFloat(document.getElementById('angle').value);
+            angle = (angle % 360) * Math.PI / 180.0; //convert degrees to rad
+            var distance = parseFloat(document.getElementById('distance').value);
+
+            //check which radio buttons are selected and based on those change the distance of the camera
+            var rightLeft, topBottom, frontBack;
+            if (document.getElementById('Right').checked)
+                rightLeft = distance;
+            else
+                rightLeft = - distance;
+
+            if (document.getElementById('Top').checked)
+                topBottom = distance;
+            else
+                topBottom = - distance;
+
+            if (document.getElementById('Front').checked)
+                frontBack = distance;
+            else
+                frontBack = - distance;
+
+            //since rightLeft - x'x, frontBack - y'y, topBottom - z'z and coordinates [x, y, z]:
+            var cameraPosition = [rightLeft, frontBack, topBottom];
+            var cameraView = [0, 0, 0]; //direction at the center of the scene
+            var cameraDirectionUp = [0, 0, 1]; //since camera has orientation upwards and parallel to z'z axis
+
+            //setting camera 
+            glMatrix.mat4.lookAt(viewMatrix, cameraPosition, cameraView, cameraDirectionUp); //define viewMatrix values
+            glMatrix.mat4.perspective(perspectiveMatrix, angle, 1, 0.001, 20 * distance); //define perspectiveMatrix with values: angle, aspect ratio=1, near threshold=0.001, far threshold=20*distance
+            glMatrix.mat4.multiply(cameraMatrix, perspectiveMatrix, viewMatrix); //combining perspective & view matrices
+            gl.uniformMatrix4fv(perspectiveViewUniformPointer, false, cameraMatrix); //set cameraMatrix's values to the uniform variable
+
+
+            //drawing 3d dog
+            //enabling buffer, getting values from it and sending them to attribute (1st parameter)
+            gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+            gl.vertexAttribPointer(vertexPositionAttributePointer, vertexBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+
+            //for each body part: scaling & translation are applied, uniform variable gets the values of the combined matrix of the transformations, body part is drawn
+            //yellow body parts
+            //enabling buffer, getting values from it and sending them to attribute (1st parameter)
+            gl.bindBuffer(gl.ARRAY_BUFFER, yellowColorBuffer);
+            gl.vertexAttribPointer(vertexColorAttributePointer, yellowColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+            //body
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3, 7, 5 / 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [0, -1, 7.5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //neck
+            glMatrix.mat4.fromScaling(ScaleMatrix, [2, 2, 3 / 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [0, 4, 11.5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //head
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3, 4, 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [0, 6, 15]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+
+            //red body parts
+            //enabling buffer, getting values from it and sending them to attribute (1st parameter)
+            gl.bindBuffer(gl.ARRAY_BUFFER, redColorBuffer);
+            gl.vertexAttribPointer(vertexColorAttributePointer, redColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+            //Ears
+            //left ear
+            glMatrix.mat4.fromScaling(ScaleMatrix, [1, 1, 5 / 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [-4, 3, 14.5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //right ear
+            glMatrix.mat4.fromScaling(ScaleMatrix, [1, 1, 5 / 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [4, 3, 14.5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //Tail
+            glMatrix.mat4.fromScaling(ScaleMatrix, [1, 1, 5 / 2]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [0, -7, 12.5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //Legs
+            //left back leg
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 3 / 2, 3]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [-4.5, -6.5, 5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //right back leg
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 3 / 2, 3]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [4.5, -6.5, 5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //left front leg
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 3 / 2, 3]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [-4.5, 4.5, 5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //right front leg
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 3 / 2, 3]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [4.5, 4.5, 5]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //Paws
+            //right back paw
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 5 / 2, 1]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [4.5, -5.5, 1]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //left back paw
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 5 / 2, 1]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [-4.5, -5.5, 1]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //right front paw
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 5 / 2, 1]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [4.5, 5.5, 1]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+            //left front paw
+            glMatrix.mat4.fromScaling(ScaleMatrix, [3 / 2, 5 / 2, 1]);
+            glMatrix.mat4.fromTranslation(TranslationMatrix, [-4.5, 5.5, 1]);
+            glMatrix.mat4.multiply(TransformMatrix, TranslationMatrix, ScaleMatrix);
+            gl.uniformMatrix4fv(transformUniformPointer, false, TransformMatrix);
+            gl.drawElements(gl.TRIANGLES, indexBuffer.itemCount, gl.UNSIGNED_SHORT, 0);
+
+        }
+
+        function main() {
+            minDimension = Math.min(window.innerHeight, window.innerWidth); //get minimum window's dimension
+            canvas = document.getElementById("sceneCanvas");
+            //setting canvas' dimensions
+            canvas.width = 0.9 * minDimension;
+            canvas.height = 0.9 * minDimension;
+            gl = WebGLDebugUtils.makeDebugContext(createGLContext(canvas)); //create webgl rendering context inside of canvas
+            initShaders();
+            initBuffers();
+            gl.clearColor(0.3, 0.3, 0.3, 1.0); //set canvas' color - background color for WebGL context
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+            gl.enable(gl.DEPTH_TEST);
+          
+            //setting default values
+            document.getElementById('angle').value = "90";
+            document.getElementById('distance').value = "20";
+            document.getElementById('Front').checked = true;
+            document.getElementById('Right').checked = true;
+            document.getElementById('Top').checked = true;
+            
+            drawScene();
+        }
+
+    </script>
+
+</head>
+
+<body onload="main()">
+    <!--placing on the left side of the screen the canvas and on the right side textboxes, radio buttons, button-->
+    <div id="container">
+        <div id="canvasContainer">
+            <canvas id="sceneCanvas"></canvas>
+        </div>
+        <div id="controlsContainer">
+            <div class="controlGroup">
+                <h1>View Angle</h1>
+                <input type="number" min="0" id="angle" value="90"> <!-- default value for angle = 90-->
+            </div>
+            <div class="controlGroup">
+                <h1>View Distance</h1>
+                <input type="number" min="0" id="distance" value="20">
+                <!-- default value for distance = 7, since camera is located at (7,7,7), but in order the dog to be visible value is set to 20-->
+            </div>
+            <div class="controlGroup">
+                <h1>Camera position</h1>
+                <div class="radioGroup">
+                    <div class="radioItem">
+                        <input type="radio" id="Front" value="Front" name="frontBack" checked="true">
+                        <label for="Front">Front</label>
+                    </div>
+                    <div class="radioItem">
+                        <input type="radio" id="Back" value="Back" name="frontBack">
+                        <label for="Back">Back</label>
+                    </div>
+                </div>
+                <div class="radioGroup">
+                    <div class="radioItem">
+                        <input type="radio" id="Right" value="Right" name="rightLeft" checked="true">
+                        <label for="Right">Right</label>
+                    </div>
+                    <div class="radioItem">
+                        <input type="radio" id="Left" value="Left" name="rightLeft">
+                        <label for="Left">Left</label>
+                    </div>
+                </div>
+                <div class="radioGroup">
+                    <div class="radioItem">
+                        <input type="radio" id="Top" value="Top" name="topBottom" checked="true">
+                        <label for="Top">Top</label>
+                    </div>
+                    <div class="radioItem">
+                        <input type="radio" id="Bottom" value="Bottom" name="topBottom">
+                        <label for="Bottom">Bottom</label>
+                    </div>
+                </div>
+            </div>
+            <button class="redrawButton" onclick="drawScene()">Redraw</button>
+        </div>
+    </div>
+</body>
+
+</html>
