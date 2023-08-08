@@ -18,7 +18,7 @@
 - mouse wheel: zooming in & out on the dog
 
 
-## Requirements
+## Prerequisites
 In Firefox `security.fileuri.strict_origin_policy` needs to be set to `false` (in `about:config`), in order the textures to be loaded properly.
 
 ## How to run
