@@ -17,6 +17,8 @@
 - mouse click & drag: moves camera to the direction dragged
 - mouse wheel: zooming in & out on the dog
 
+### Screenshot
+![](https://github.com/GeorgiaKt/3D-Dog-Model/blob/main/Screenshot_dog_webgl.png)
 
 ## Prerequisites
 In Firefox `security.fileuri.strict_origin_policy` needs to be set to `false` (in `about:config`), in order the textures to be loaded properly.
